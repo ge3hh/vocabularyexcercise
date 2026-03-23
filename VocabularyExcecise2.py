@@ -1,258 +1,437 @@
+import os
 import tkinter as tk
-from operator import index
-from tkinter import simpledialog, messagebox, filedialog, font
-from tkinter.font import Font
-import csv
-import random
-from vocabulary_pool import *
+from tkinter import filedialog, font, messagebox, simpledialog
 
-# 初始空的词汇库
-vocabulary = {}
+from vocabulary_pool import (
+    DEFAULT_LIBRARY_NAME,
+    LIBRARY_TABLES,
+    clear_up_db,
+    ensure_all_libraries,
+    export_vocabulary_db,
+    get_library_word_count,
+    get_recent_first_test_records,
+    get_statistics,
+    get_words_for_test,
+    get_wrong_words,
+    import_new_words,
+    record_practice_result,
+)
 
-# 记录用户选择“不认识”的单词以及学过的单词
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_IMPORT_FILE = os.path.join(BASE_DIR, "learning.csv")
+BUILTIN_LIBRARY_FILES = {
+    "高中词库": os.path.join(BASE_DIR, "learning.csv"),
+    "大学四级词库": os.path.join(BASE_DIR, "cet4.csv"),
+    "大学六级词库": os.path.join(BASE_DIR, "cet6.csv"),
+}
+
 unknown_words = []
 learned_words = []
-
-# 用户选择的测试数量
-test_quantity = 0
-
-filename = 'C:\\learning\\learning.csv'
-table_name = 'vocabulary_hs'
-
-vocabulary_all = {}
-
-def load_vocabulary_from_db (table_name, test_quantity):
-    conn = sqlite3.connect('vocabulary_hs.db')
-    cursor = conn.cursor()
-
-    cursor.execute ("SELECT * FROM {} ORDER BY RANDOM() LIMIT ?".format(table_name),(test_quantity,))
-
-    vocabulary = cursor.fetchall()
+current_test_words = []
+current_test_index = 0
+statistics_window = None
+statistics_labels = {}
+statistics_records_text = None
 
 
-    # verify the vocabulary{}
-    for word in vocabulary:
-        print(word)
+def get_selected_table_name():
+    return LIBRARY_TABLES[current_library_name.get()]
 
 
-    cursor.close()
-    conn.close()
+def reset_session_state():
+    global current_test_words, current_test_index
 
-    return vocabulary
-
-"""
-# 函数：从CSV文件加载词汇库
-def load_vocabulary_from_csv(file_path):
-    try:
-        with open(file_path, mode='r', encoding='utf-8', errors='ignore') as csvfile:
-            reader = csv.DictReader(csvfile)
-            for row in reader:
-                vocabulary[row['english']] = row['chinese']
-    except FileNotFoundError:
-        messagebox.showerror("错误", "找不到文件，请检查文件路径。")
-    except Exception as e:
-        messagebox.showerror("错误", f"读取文件时发生错误：{e}")
-"""
-
-# 函数：询问用户测试数量并开始测试
-def ask_test_count():
-    global test_quantity
-
-    conn = sqlite3.connect('vocabulary_hs.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM vocabulary_hs")
-    vocabulary_count = cursor.fetchone()[0]
-
-    test_quantity_max = vocabulary_count
-
-    test_quantity = simpledialog.askinteger("单词测试", "请选择您想要测试的单词数量:", minvalue=1,
-                                            maxvalue=test_quantity_max)
-    if test_quantity is None:  # 如果检测到取消操作，直接关闭对话框
-        pass
-    elif 1 <= test_quantity <= test_quantity_max:
-
-        cursor.execute("SELECT * FROM {} ORDER BY RANDOM() LIMIT ?".format(table_name), (test_quantity,))
-
-        vocabulary_list = cursor.fetchall()
-        vocabulary = {
-            english: {'chinese': chinese, 'practice_times': practice_times, 'last_practice_date': last_practice_date}
-            for id, english, chinese, practice_times, last_practice_date in vocabulary_list}
-        try:
-            print(test_quantity)
-            print(vocabulary_list)
-            print(list(vocabulary.keys()))
-        except IndexError:
-            print("error is here")
-        test_words = random.sample(list(vocabulary.keys()), test_quantity)
-
-        test_index = 0
-
-        show_next_word(test_words, test_index)
-    else:
-        messagebox.showerror("错误", "请输入一个有效的数量（1 到 {} 之间）！".format(test_quantity_max))
-        ask_test_count()  # 如果输入无效，重新询问
-
-    cursor.close()
-    conn.close()
-
-# 函数：显示下一个单词并询问用户是否认识
-def show_next_word(test_words, index):
-    if index < test_quantity:
-        learned_words.append(test_words[index])  # 添加到学过的单词列表
-        show_word_label.config(text=test_words[index])
-        known_button.config(command=lambda: button_response(test_words, index,True))
-        unknown_button.config(command=lambda: button_response(test_words, index,False))
-        update_practice_data(learned_words)
-    else:
-        end_test()  # 测试结束
+    unknown_words.clear()
+    learned_words.clear()
+    current_test_words = []
+    current_test_index = 0
+    show_word_label.config(text="")
+    progress_label.config(text="准备开始新一轮测试")
 
 
-def button_response(test_words,index, is_known):
-    if is_known:
-        # 用户选择“认识”
-        show_next_word(test_words, index + 1)
-    else:
-        # 用户选择“不认识”
-        unknown_words.append(test_words[index])
-        if index + 1 < test_quantity:
-            show_next_word(test_words, index + 1)
-        else:
-            end_test()
-
-# 等待用户点击按钮
-    root.wait_window(root)
-
-
-# 函数：测试结束后的操作
-def end_test():
-    messagebox.showinfo("测试结束", f"所有单词测试已完成，保存不认识的单词清单")
-    # 显示不认识的单词
-    unknown_words_str = '\n'.join(unknown_words) \
-
-    if unknown_words:
-        # 保存不认识的单词到文件
-        save_unknown_words_to_file()
-    else: "没有不认识的单词。"
-    messagebox.showinfo("测试结束", f"您不认识的单词有:\n{unknown_words_str}")
-#    root.destroy()  # 关闭自定义对话框
-
-# 函数：保存不认识的单词到文件
-def save_unknown_words_to_file():
-    # 弹出保存文件对话框
-    file_path = filedialog.asksaveasfilename(
-        defaultextension=".txt",
-        filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+def refresh_library_summary(*_args):
+    stats = get_statistics(get_selected_table_name())
+    library_summary_label.config(
+        text=(
+            f"当前词库：{stats['library_name']} | 总词数：{stats['total_words']} | "
+            f"待复习：{stats['due_words']} | 错题本：{stats['wrong_notebook_count']}"
+        )
     )
-    if file_path:
-        try:
-            # 写入不认识的单词到文件
-            with open(file_path, 'w', encoding='utf-8') as file:
-                for word in unknown_words:
-                    file.write(word + '\n')
-            messagebox.showinfo("完成", "不认识的单词已保存到文件。")
-        except Exception as e:
-            messagebox.showerror("错误", f"保存文件时发生错误：{e}")
+
+    refresh_statistics_window()
 
 
-# 函数：显示所有不认识的单词
-def show_unknown_words():
-    if unknown_words:
-        unknown_words_str = '\n'.join(unknown_words)
-        messagebox.showinfo("不认识的单词", f"您不认识的单词有:\n{unknown_words_str}")
+def choose_csv_file():
+    initial_dir = BASE_DIR
+    initial_file = os.path.basename(DEFAULT_IMPORT_FILE) if os.path.exists(DEFAULT_IMPORT_FILE) else ""
+
+    return filedialog.askopenfilename(
+        title="选择词库 CSV 文件",
+        initialdir=initial_dir,
+        initialfile=initial_file,
+        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+    )
+
+
+def import_words_for_current_library():
+    file_path = choose_csv_file()
+    if not file_path:
+        return
+
+    try:
+        imported_count = import_new_words(file_path, get_selected_table_name())
+        refresh_library_summary()
+        messagebox.showinfo("导入完成", f"已向{current_library_name.get()}导入 {imported_count} 个单词。")
+    except Exception as exc:
+        messagebox.showerror("导入失败", f"导入词库时发生错误：{exc}")
+
+
+def import_builtin_library():
+    file_path = BUILTIN_LIBRARY_FILES.get(current_library_name.get())
+
+    if not file_path or not os.path.exists(file_path):
+        messagebox.showerror("导入失败", "当前词库没有对应的内置 CSV 文件。")
+        return
+
+    try:
+        imported_count = import_new_words(file_path, get_selected_table_name())
+        refresh_library_summary()
+        messagebox.showinfo("导入完成", f"已从内置词库导入 {imported_count} 个单词到{current_library_name.get()}。")
+    except Exception as exc:
+        messagebox.showerror("导入失败", f"导入内置词库时发生错误：{exc}")
+
+
+def export_current_library():
+    file_path = filedialog.asksaveasfilename(
+        title="导出当前词库",
+        defaultextension=".csv",
+        initialfile=f"{current_library_name.get()}.csv",
+        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+    )
+    if not file_path:
+        return
+
+    try:
+        exported_count = export_vocabulary_db(get_selected_table_name(), file_path)
+        messagebox.showinfo("导出完成", f"已导出 {exported_count} 条记录。")
+    except Exception as exc:
+        messagebox.showerror("导出失败", f"导出词库时发生错误：{exc}")
+
+
+def clear_current_library():
+    should_clear = messagebox.askyesno(
+        "确认清空",
+        f"确定清空 {current_library_name.get()} 的全部词汇和对应错题记录吗？",
+    )
+    if not should_clear:
+        return
+
+    clear_up_db(get_selected_table_name())
+    reset_session_state()
+    refresh_library_summary()
+    messagebox.showinfo("清空完成", f"{current_library_name.get()} 已清空。")
+
+
+def ask_test_count():
+    global current_test_words, current_test_index
+
+    table_name = get_selected_table_name()
+    vocabulary_count = get_library_word_count(table_name)
+
+    if vocabulary_count == 0:
+        messagebox.showwarning("词库为空", "当前词库没有单词，请先导入 CSV。")
+        return
+
+    reset_session_state()
+
+    test_quantity = simpledialog.askinteger(
+        "单词测试",
+        "请选择您想要测试的单词数量：",
+        minvalue=1,
+        maxvalue=vocabulary_count,
+    )
+
+    if test_quantity is None:
+        progress_label.config(text="已取消本次测试")
+        return
+
+    current_test_words = get_words_for_test(table_name, test_quantity)
+    current_test_index = 0
+
+    if not current_test_words:
+        messagebox.showinfo("没有可测试的单词", "当前词库没有可用单词。")
+        return
+
+    show_next_word()
+
+
+def show_next_word():
+    if current_test_index < len(current_test_words):
+        word = current_test_words[current_test_index]
+        show_word_label.config(text=word["english"])
+        progress_label.config(
+            text=(
+                f"第 {current_test_index + 1}/{len(current_test_words)} 个 | "
+                f"词义：{word['chinese'] or '未填写释义'}"
+            )
+        )
     else:
-        messagebox.showinfo("不认识的单词", "您认识本次测试中的所有单词。")
+        end_test()
 
 
-# 函数：显示所有学过的单词
+def button_response(is_known):
+    global current_test_index
+
+    if current_test_index >= len(current_test_words):
+        return
+
+    word = current_test_words[current_test_index]
+    learned_words.append(word["english"])
+    record_practice_result(get_selected_table_name(), word["english"], is_known)
+
+    if not is_known:
+        unknown_words.append(f"{word['english']} - {word['chinese'] or '未填写释义'}")
+
+    current_test_index += 1
+    refresh_library_summary()
+    show_next_word()
+
+
+def end_test():
+    show_word_label.config(text="测试完成")
+    progress_label.config(text=f"本轮共完成 {len(learned_words)} 个单词")
+
+    if unknown_words:
+        should_save = messagebox.askyesno(
+            "测试结束",
+            f"本轮有 {len(unknown_words)} 个错题，是否导出错题清单？",
+        )
+        if should_save:
+            save_unknown_words_to_file()
+
+        messagebox.showinfo("测试结束", "您本轮答错的单词如下：\n" + "\n".join(unknown_words))
+    else:
+        messagebox.showinfo("测试结束", "本轮测试全部答对，没有新增错题。")
+
+
+def save_unknown_words_to_file():
+    file_path = filedialog.asksaveasfilename(
+        title="保存错题清单",
+        defaultextension=".txt",
+        initialfile="wrong_words.txt",
+        filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+    )
+    if not file_path:
+        return
+
+    try:
+        with open(file_path, "w", encoding="utf-8") as output_file:
+            output_file.write("\n".join(unknown_words))
+        messagebox.showinfo("保存完成", "错题清单已保存到文件。")
+    except Exception as exc:
+        messagebox.showerror("保存失败", f"保存文件时发生错误：{exc}")
+
+
+def show_wrong_notebook():
+    wrong_words = get_wrong_words(get_selected_table_name())
+    if not wrong_words:
+        messagebox.showinfo("错题本", "当前词库还没有错题记录。")
+        return
+
+    lines = []
+    for index, word in enumerate(wrong_words, start=1):
+        lines.append(
+            f"{index}. {word['english']} - {word['chinese'] or '未填写释义'} | "
+            f"错误次数：{word['wrong_count']} | 最近错误：{word['last_wrong_date']}"
+        )
+
+    messagebox.showinfo("错题本", "\n".join(lines))
+
+
+def get_statistics_lines():
+    stats = get_statistics(get_selected_table_name())
+    return [
+        ("词库", stats["library_name"]),
+        ("总词数", stats["total_words"]),
+        ("已测试词数", stats["tested_words"]),
+        ("待复习词数", stats["due_words"]),
+        ("已掌握", stats["mastered_words"]),
+        ("学习中", stats["learning_words"]),
+        ("复习中", stats["review_words"]),
+        ("累计练习次数", stats["total_practice"]),
+        ("累计答错次数", stats["total_wrong"]),
+        ("错题本条目", stats["wrong_notebook_count"]),
+        ("本轮已练习", len(learned_words)),
+        ("本轮错题", len(unknown_words)),
+    ]
+
+
+def refresh_statistics_window():
+    if statistics_window is None or not statistics_window.winfo_exists():
+        return
+
+    for key, value in get_statistics_lines():
+        statistics_labels[key].config(text=str(value))
+
+    if statistics_records_text is not None and statistics_records_text.winfo_exists():
+        statistics_records_text.config(state=tk.NORMAL)
+        statistics_records_text.delete("1.0", tk.END)
+        records = get_recent_first_test_records(get_selected_table_name())
+        if records:
+            for index, record in enumerate(records, start=1):
+                statistics_records_text.insert(
+                    tk.END,
+                    f"{index}. {record['english']} - {record['chinese'] or '未填写释义'} | 首测：{record['first_test_date']}\n",
+                )
+        else:
+            statistics_records_text.insert(tk.END, "当前词库还没有首次测试记录。")
+        statistics_records_text.config(state=tk.DISABLED)
+
+
+def close_statistics_window():
+    global statistics_window, statistics_labels, statistics_records_text
+
+    if statistics_window is not None and statistics_window.winfo_exists():
+        statistics_window.destroy()
+
+    statistics_window = None
+    statistics_labels = {}
+    statistics_records_text = None
+
+
+def show_statistics_panel():
+    global statistics_window, statistics_labels, statistics_records_text
+
+    if statistics_window is not None and statistics_window.winfo_exists():
+        statistics_window.lift()
+        refresh_statistics_window()
+        return
+
+    statistics_window = tk.Toplevel(root)
+    statistics_window.title("统计面板")
+    statistics_window.geometry("560x520")
+    statistics_window.resizable(False, False)
+    statistics_window.protocol("WM_DELETE_WINDOW", close_statistics_window)
+
+    container = tk.Frame(statistics_window, padx=18, pady=18)
+    container.pack(fill="both", expand=True)
+
+    tk.Label(container, text="学习统计", font=("Arial", 18, "bold")).pack(anchor="w", pady=(0, 16))
+
+    statistics_labels = {}
+    for key, value in get_statistics_lines():
+        row = tk.Frame(container)
+        row.pack(fill="x", pady=4)
+
+        tk.Label(row, text=f"{key}：", font=label_font, width=12, anchor="w").pack(side=tk.LEFT)
+        value_label = tk.Label(row, text=str(value), font=label_font, anchor="w")
+        value_label.pack(side=tk.LEFT, fill="x", expand=True)
+        statistics_labels[key] = value_label
+
+    tk.Label(container, text="最近首次测试记录", font=("Arial", 14, "bold")).pack(anchor="w", pady=(18, 8))
+
+    records_frame = tk.Frame(container, bd=1, relief=tk.SOLID)
+    records_frame.pack(fill="both", expand=True)
+
+    statistics_records_text = tk.Text(records_frame, height=10, font=("Consolas", 10), wrap="word")
+    statistics_records_text.pack(side=tk.LEFT, fill="both", expand=True)
+
+    records_scrollbar = tk.Scrollbar(records_frame, orient=tk.VERTICAL, command=statistics_records_text.yview)
+    records_scrollbar.pack(side=tk.RIGHT, fill="y")
+    statistics_records_text.config(yscrollcommand=records_scrollbar.set, state=tk.DISABLED)
+
+    tk.Button(container, text="刷新", command=refresh_statistics_window, width=10, font=label_font).pack(anchor="e", pady=(16, 0))
+    refresh_statistics_window()
+
+
 def show_learned_words():
     if learned_words:
-        learned_words_str = '\n'.join(learned_words)
-        messagebox.showinfo("学过的单词", f"您学过的单词有:\n{learned_words_str}")
+        messagebox.showinfo("本轮记录", "\n".join(learned_words))
     else:
-        messagebox.showinfo("学过的单词", "您还没有学过任何单词。")
+        messagebox.showinfo("本轮记录", "当前还没有开始测试。")
 
 
-# 函数：清空学过的单词列表
-def clear_learned_words():
-    global learned_words
-    learned_words.clear()
-    messagebox.showinfo("清空单词", "已清空所有学过的单词。")
+ensure_all_libraries()
 
-
-# 创建主窗口
 root = tk.Tk()
 root.title("词汇学习器")
+root.geometry("900x520")
 
+button_font = font.Font(family="Arial", size=16, weight="bold")
+label_font = font.Font(family="Arial", size=12)
 
-# 设置字体
-button_font = font.Font(family="Arial", size=20, weight="bold")
+current_library_name = tk.StringVar(value=DEFAULT_LIBRARY_NAME)
 
-# 创建词汇库管理菜单
 vocabulary_management_bar = tk.Menu(root)
 root.config(menu=vocabulary_management_bar)
 
 file_menu = tk.Menu(vocabulary_management_bar, tearoff=False)
-vocabulary_management_bar.add_cascade(label="词汇库管理", menu=file_menu)
+vocabulary_management_bar.add_cascade(label="词库管理", menu=file_menu)
+file_menu.add_command(label="导入当前词库内置 CSV", command=import_builtin_library)
+file_menu.add_command(label="导入到当前词库", command=import_words_for_current_library)
+file_menu.add_command(label="导出当前词库", command=export_current_library)
+file_menu.add_command(label="清空当前词库", command=clear_current_library)
 
-file_menu.add_command(label="增加新词汇", command=lambda: import_new_words (filename) )
-file_menu.add_command(label="导出词汇库", command=lambda: export_vocabulary_db () )
-file_menu.add_command(label="清除库中所有词汇", command=lambda: clear_up_db () )
-file_menu.add_command(label="创建新词汇库", command=lambda: import_new_words (filename) )
+top_frame = tk.Frame(root)
+top_frame.pack(fill="x", padx=16, pady=(16, 8))
 
-"""
-# 创建按钮加载词汇库
-load_vocabulary_button = tk.Button(root, text="加载词汇库", command=lambda: load_vocabulary_from_csv('C:\\learning\\learning.csv'),
-                   width=20,  # 设置按钮宽度为20个字符宽
-                   height=2,  # 设置按钮高度为2行高
-                   font=button_font)  # 设置按钮上文字的字体
-load_vocabulary_button.pack(pady=10)
-"""
+tk.Label(top_frame, text="选择词库：", font=label_font).pack(side=tk.LEFT)
+library_selector = tk.OptionMenu(top_frame, current_library_name, *LIBRARY_TABLES.keys(), command=refresh_library_summary)
+library_selector.config(font=label_font)
+library_selector.pack(side=tk.LEFT, padx=(8, 16))
 
-# 创建按钮询问测试数量
-start_button = tk.Button(root, text="开始测试", command=ask_test_count,
-                    width=20,  # 设置按钮宽度为20个字符宽
-                    height=2,  # 设置按钮高度为2行高
-                    font=button_font)  # 设置按钮上文字的字体
-start_button.pack(pady=10)
+library_summary_label = tk.Label(top_frame, text="", font=label_font, anchor="w")
+library_summary_label.pack(side=tk.LEFT, fill="x", expand=True)
 
-# 创建按钮显示所有学过的单词
-show_learned_button = tk.Button(root, text="查看学过的单词", command=show_learned_words,
-                    width=20,  # 设置按钮宽度为20个字符宽
-                    height=2,  # 设置按钮高度为2行高
-                    font=button_font)  # 设置按钮上文字的字体
-show_learned_button.pack(pady=10)
+action_frame = tk.Frame(root)
+action_frame.pack(fill="x", padx=16, pady=8)
 
-# 创建按钮清空所有学过的单词
-clear_learned_button = tk.Button(root, text="清空学过的单词", command=clear_learned_words,
-                    width=20,  # 设置按钮宽度为20个字符宽
-                    height=2,  # 设置按钮高度为2行高
-                    font=button_font)  # 设置按钮上文字的字体
-clear_learned_button.pack(pady=10)
+start_button = tk.Button(action_frame, text="开始测试", command=ask_test_count, width=12, height=2, font=button_font)
+start_button.pack(side=tk.LEFT, padx=6)
 
-question_label = tk.Label(root, text="看看这个单词~", font=button_font,
-                    width = 40,  # 设置按钮宽度为20个字符宽
-                    height = 2)  # 设置按钮高度为2行高
-question_label.pack(pady=10)
+show_learned_button = tk.Button(action_frame, text="本轮记录", command=show_learned_words, width=12, height=2, font=button_font)
+show_learned_button.pack(side=tk.LEFT, padx=6)
 
-show_word_label = tk.Label(root, text="", font=("Arial", 40, "bold"), bg="grey",
-                    width = 20,  # 设置按钮宽度为20个字符宽
-                    height = 2)  # 设置按钮高度为2行高
-show_word_label.pack(fill='x', pady=10)
+wrong_notebook_button = tk.Button(action_frame, text="错题本", command=show_wrong_notebook, width=12, height=2, font=button_font)
+wrong_notebook_button.pack(side=tk.LEFT, padx=6)
 
-known_button = tk.Button(root, text="认识", command=lambda: button_response(True),
-                    width=8,  # 设置按钮宽度为20个字符宽
-                    height=2,  # 设置按钮高度为2行高
-                    activebackground='green',
-                    font=button_font)  # 设置按钮上文字的字体
-known_button.pack(side=tk.LEFT,fill='x', expand= True, padx=10, pady=10)
+statistics_button = tk.Button(action_frame, text="统计面板", command=show_statistics_panel, width=12, height=2, font=button_font)
+statistics_button.pack(side=tk.LEFT, padx=6)
 
-unknown_button = tk.Button(root, text="不认识", command=lambda: button_response(False),
-                    width=8,  # 设置按钮宽度为20个字符宽
-                    height=2,  # 设置按钮高度为2行高
-                    activebackground='orange',
-                    font=button_font)  # 设置按钮上文字的字体
-unknown_button.pack(side=tk.RIGHT,fill='x', expand= True, padx=10, pady=10)
+question_label = tk.Label(root, text="看看这个单词", font=button_font, width=30, height=2)
+question_label.pack(pady=(20, 8))
 
+show_word_label = tk.Label(root, text="", font=("Arial", 36, "bold"), bg="#d9d9d9", width=22, height=2)
+show_word_label.pack(fill="x", padx=16, pady=8)
 
-# 运行应用程序
+progress_label = tk.Label(root, text="准备开始新一轮测试", font=label_font)
+progress_label.pack(pady=8)
+
+answer_frame = tk.Frame(root)
+answer_frame.pack(fill="x", padx=16, pady=20)
+
+known_button = tk.Button(
+    answer_frame,
+    text="认识",
+    command=lambda: button_response(True),
+    width=12,
+    height=2,
+    activebackground="green",
+    font=button_font,
+)
+known_button.pack(side=tk.LEFT, fill="x", expand=True, padx=6)
+
+unknown_button = tk.Button(
+    answer_frame,
+    text="不认识",
+    command=lambda: button_response(False),
+    width=12,
+    height=2,
+    activebackground="orange",
+    font=button_font,
+)
+unknown_button.pack(side=tk.RIGHT, fill="x", expand=True, padx=6)
+
+refresh_library_summary()
 root.mainloop()
